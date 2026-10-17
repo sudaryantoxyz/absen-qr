@@ -40,6 +40,19 @@
   #riwayat li { padding: 6px 8px; border-bottom: 1px solid #dde3ea; background: #fff; }
   #belum { font-size: 14px; background: #fff; padding: 8px 12px; border-radius: 10px; display: none; }
   #fileReader { display: none; }
+  .kamera { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+  .kamera button { padding: 10px 0; font-size: 15px; font-weight: 600; border: 2px solid #5c6b7a;
+                   background: #fff; color: #5c6b7a; border-radius: 10px; }
+  .kamera button.aktif { background: #5c6b7a; color: #fff; }
+  #notif { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+           align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  #notif.tampak { display: flex; }
+  #notif .kotak { background: #fff; border-radius: 16px; padding: 24px 20px; width: 100%; max-width: 420px;
+                  text-align: center; border-top: 10px solid #2e7d32; }
+  #notif .centang { font-size: 64px; line-height: 1; color: #2e7d32; }
+  #notif h2 { margin: 8px 0 4px; color: #2e7d32; font-size: 24px; }
+  #notif .kode { font-size: 22px; font-weight: 700; margin: 8px 0 4px; word-break: break-word; }
+  #notif .rinci { color: #4a5563; font-size: 16px; }
 </style>
 </head>
 <body>
@@ -52,6 +65,9 @@
   </div>
 
   <div class="label">2. Scan QR cocard</div>
+  <div class="kamera" id="pilihKamera">
+    <button data-k="environment">Kamera belakang</button><button data-k="user">Kamera depan</button>
+  </div>
   <button class="tombol" id="btnKamera">Mulai Kamera</button>
   <div id="reader"></div>
   <button class="tombol abu" id="btnFoto">Kamera tidak muncul? Foto QR di sini</button>
@@ -75,9 +91,22 @@
   <ul id="riwayat"></ul>
 </main>
 
+<div id="notif">
+  <div class="kotak">
+    <div class="centang">✔</div>
+    <h2>ABSEN BERHASIL</h2>
+    <div class="kode" id="notifKode"></div>
+    <div class="rinci" id="notifRinci"></div>
+    <button class="tombol" id="btnLanjut">Scan berikutnya</button>
+    <button class="tombol abu" id="btnTutupNotif">Tutup</button>
+  </div>
+</div>
+
 <script>
   var sesi = null, scanner = null, sibuk = false, terakhir = { kode: '', t: 0 };
   var el = function (id) { return document.getElementById(id); };
+  var arahKamera = 'environment';   // bawaan: kamera belakang
+  try { arahKamera = localStorage.getItem('arahKamera') || 'environment'; } catch (e) {}
   var NAMA_SESI = ['', 'Subuh', 'Pagi', 'Siang', 'Malam'];
   var API = 'https://script.google.com/macros/s/AKfycbx4JoRTIcZNyth6ZbTQ-8vBmKRHidyNcoyIc0XjLBQkUOl3z0qbRxibrTBIhDGGR3Fjeg/exec';
 
@@ -160,6 +189,13 @@
       li.textContent = '✖ ' + (r.kode || '') + ' — ' + r.status;
     }
     bunyi(r.ok);
+    if (r.ok) {
+      // Berhasil: kamera ditutup dan muncul pemberitahuan besar.
+      matikanKamera();
+      el('notifKode').textContent = r.kode;
+      el('notifRinci').textContent = r.peran + ' · ' + NAMA_SESI[sesi] + ' · pukul ' + r.jam;
+      el('notif').classList.add('tampak');
+    }
     var ul = el('riwayat'); ul.insertBefore(li, ul.firstChild);
     while (ul.children.length > 15) ul.removeChild(ul.lastChild);
     muatRingkas();
@@ -173,20 +209,52 @@
     kirim(teks);
   }
 
-  el('btnKamera').onclick = function () {
+  function aturTombolKamera(nyala) {
+    el('btnKamera').textContent = nyala ? 'Matikan Kamera' : 'Mulai Kamera';
+    el('btnKamera').classList.toggle('merah', nyala);
+  }
+
+  function mulaiKamera() {
     if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Subuh, Pagi, Siang, atau Malam di atas.'); return; }
-    if (scanner) {
-      scanner.stop().then(function () { scanner.clear(); scanner = null; el('btnKamera').textContent = 'Mulai Kamera'; el('btnKamera').classList.remove('merah'); });
-      return;
-    }
+    if (scanner) return;
     scanner = new Html5Qrcode('reader');
-    scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 240, height: 240 } }, saatTerbaca, function () {})
-      .then(function () { el('btnKamera').textContent = 'Matikan Kamera'; el('btnKamera').classList.add('merah'); })
+    scanner.start({ facingMode: arahKamera }, { fps: 10, qrbox: { width: 240, height: 240 } }, saatTerbaca, function () {})
+      .then(function () { aturTombolKamera(true); })
       .catch(function (e) {
         scanner = null;
         tampil('gagal', 'Kamera tidak bisa dibuka', 'Izinkan akses kamera, atau pakai tombol "Foto QR di sini". (' + e + ')');
       });
+  }
+
+  function matikanKamera(lalu) {
+    var s = scanner;
+    scanner = null;
+    aturTombolKamera(false);
+    if (!s) { if (lalu) lalu(); return; }
+    s.stop().catch(function () {}).then(function () { try { s.clear(); } catch (e) {} if (lalu) lalu(); });
+  }
+
+  el('btnKamera').onclick = function () {
+    if (scanner) matikanKamera(); else mulaiKamera();
   };
+
+  function tandaiKamera() {
+    document.querySelectorAll('#pilihKamera button').forEach(function (b) {
+      b.classList.toggle('aktif', b.dataset.k === arahKamera);
+    });
+  }
+  document.querySelectorAll('#pilihKamera button').forEach(function (b) {
+    b.onclick = function () {
+      arahKamera = b.dataset.k;
+      try { localStorage.setItem('arahKamera', arahKamera); } catch (e) {}
+      tandaiKamera();
+      if (scanner) matikanKamera(mulaiKamera);   // kamera sedang menyala: pindah langsung
+    };
+  });
+  tandaiKamera();
+
+  el('btnLanjut').onclick = function () { el('notif').classList.remove('tampak'); mulaiKamera(); };
+  el('btnTutupNotif').onclick = function () { el('notif').classList.remove('tampak'); };
 
   el('btnFoto').onclick = function () { el('inputFoto').click(); };
   el('inputFoto').onchange = function () {
