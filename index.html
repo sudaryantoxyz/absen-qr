@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absen QR</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#1f4e79">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f2f4f7; color: #1d2433; }
+  header { background: #1f4e79; color: #fff; padding: 12px 16px; font-size: 18px; font-weight: 700; }
+  header small { display: block; font-weight: 400; opacity: .85; font-size: 13px; }
+  main { padding: 12px 16px 40px; max-width: 520px; margin: 0 auto; }
+  .label { font-weight: 600; margin: 10px 0 6px; }
+  .sesi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .sesi button { padding: 14px 0; font-size: 17px; font-weight: 700; border: 2px solid #1f4e79;
+                 background: #fff; color: #1f4e79; border-radius: 10px; }
+  .sesi button.aktif { background: #1f4e79; color: #fff; }
+  .tombol { display: block; width: 100%; padding: 14px; margin-top: 10px; font-size: 16px; font-weight: 600;
+            border: 0; border-radius: 10px; background: #2e7d32; color: #fff; }
+  .tombol.abu { background: #5c6b7a; }
+  .tombol.merah { background: #b3261e; }
+  #reader { margin-top: 12px; border-radius: 10px; overflow: hidden; background: #000; }
+  #hasil { margin-top: 12px; padding: 16px; border-radius: 12px; font-size: 17px; min-height: 70px;
+           background: #fff; border: 2px solid #d0d7de; }
+  #hasil.ok { background: #d4edda; border-color: #2e7d32; }
+  #hasil.gagal { background: #f8d7da; border-color: #b3261e; }
+  #hasil.info { background: #fff8e1; border-color: #f0b400; }
+  #hasil b.besar { display: block; font-size: 22px; margin-bottom: 4px; }
+  .hitung { margin-top: 12px; font-size: 15px; }
+  .baris { display: flex; gap: 8px; margin-top: 10px; }
+  .baris input { flex: 1; padding: 12px; font-size: 16px; border: 1px solid #aab4c0; border-radius: 10px; }
+  .baris button { padding: 0 16px; font-size: 16px; border: 0; border-radius: 10px; background: #1f4e79; color: #fff; }
+  #riwayat { list-style: none; padding: 0; margin: 8px 0 0; font-size: 14px; }
+  #riwayat li { padding: 6px 8px; border-bottom: 1px solid #dde3ea; background: #fff; }
+  #belum { font-size: 14px; background: #fff; padding: 8px 12px; border-radius: 10px; display: none; }
+  #fileReader { display: none; }
+</style>
+</head>
+<body>
+<header>Absen QR <small id="subjudul">Pilih sesi terlebih dahulu</small></header>
+<main>
+  <div class="label">1. Pilih sesi</div>
+  <div class="sesi" id="pilihSesi">
+    <button data-s="1">Sesi 1</button><button data-s="2">Sesi 2</button>
+    <button data-s="3">Sesi 3</button><button data-s="4">Sesi 4</button>
+  </div>
+
+  <div class="label">2. Scan QR cocard</div>
+  <button class="tombol" id="btnKamera">Mulai Kamera</button>
+  <div id="reader"></div>
+  <button class="tombol abu" id="btnFoto">Kamera tidak muncul? Foto QR di sini</button>
+  <input type="file" id="inputFoto" accept="image/*" capture="environment" hidden>
+  <div id="fileReader"></div>
+
+  <div id="hasil">Belum ada scan.</div>
+  <div class="hitung" id="hitung"></div>
+
+  <div class="label">Ketik manual (bila QR rusak)</div>
+  <div class="baris">
+    <input id="manual" list="daftarKode" placeholder="mis. DAMAI - MT" autocomplete="off">
+    <datalist id="daftarKode"></datalist>
+    <button id="btnManual">Absen</button>
+  </div>
+
+  <button class="tombol abu" id="btnBelum">Lihat yang belum hadir</button>
+  <div id="belum"></div>
+
+  <div class="label">Scan terakhir di HP ini</div>
+  <ul id="riwayat"></ul>
+</main>
+
+<script>
+  var sesi = null, scanner = null, sibuk = false, terakhir = { kode: '', t: 0 };
+  var el = function (id) { return document.getElementById(id); };
+  var API = 'https://script.google.com/macros/s/AKfycbx4JoRTIcZNyth6ZbTQ-8vBmKRHidyNcoyIc0XjLBQkUOl3z0qbRxibrTBIhDGGR3Fjeg/exec';
+
+  // Panggil program di Google Sheets (tanpa cookie akun Google, jadi tidak kena bug multi-akun).
+  function api(param, berhasil, gagal) {
+    var q = Object.keys(param).map(function (k) { return k + '=' + encodeURIComponent(param[k]); }).join('&');
+    fetch(API + '?' + q, { credentials: 'omit', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(berhasil)
+      .catch(function (e) { if (gagal) gagal(e); });
+  }
+
+
+  document.querySelectorAll('#pilihSesi button').forEach(function (b) {
+    b.onclick = function () { pilihSesi(Number(b.dataset.s)); };
+  });
+
+  function pilihSesi(n) {
+    sesi = n;
+    try { localStorage.setItem('sesiAbsen', n); } catch (e) {}
+    document.querySelectorAll('#pilihSesi button').forEach(function (b) {
+      b.classList.toggle('aktif', Number(b.dataset.s) === n);
+    });
+    el('subjudul').textContent = 'Sedang mencatat: SESI ' + n;
+    el('belum').style.display = 'none';
+    muatRingkas();
+  }
+
+  function muatRingkas() {
+    if (!sesi) return;
+    api({ aksi: 'ringkas', sesi: sesi }, function (r) {
+      if (!r || r.total === undefined) return;
+      el('hitung').textContent = 'Hadir Sesi ' + sesi + ': ' + r.hadir + ' dari ' + r.total + ' peserta';
+      var dl = el('daftarKode');
+      if (!dl.children.length) r.semuaKode.forEach(function (k) {
+        var o = document.createElement('option'); o.value = k; dl.appendChild(o);
+      });
+      if (el('belum').style.display === 'block') tampilBelum(r.belum);
+    });
+  }
+
+  function tampil(kelas, judul, rincian) {
+    var h = el('hasil');
+    h.className = kelas;
+    h.innerHTML = '';
+    var b = document.createElement('b'); b.className = 'besar'; b.textContent = judul; h.appendChild(b);
+    if (rincian) { var d = document.createElement('div'); d.textContent = rincian; h.appendChild(d); }
+  }
+
+  function bunyi(ok) {
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var o = ctx.createOscillator(); o.frequency.value = ok ? 1200 : 300;
+      o.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + (ok ? 0.15 : 0.5));
+    } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(ok ? 100 : [200, 100, 200]);
+  }
+
+  function kirim(teks) {
+    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Sesi 1, 2, 3, atau 4 di atas.'); bunyi(false); return; }
+    sibuk = true;
+    tampil('info', 'Memproses…', teks);
+    api({ aksi: 'absen', kode: teks, sesi: sesi },
+      function (r) { sibuk = false; hasil(r); },
+      function (e) {
+        sibuk = false;
+        tampil('gagal', 'Gagal terhubung', 'Cek sinyal internet lalu scan ulang. (' + e.message + ')');
+        bunyi(false);
+      });
+  }
+
+  function hasil(r) {
+    var li = document.createElement('li');
+    if (r.ok) {
+      tampil('ok', '✔ HADIR — ' + r.kode, r.peran + ' · Sesi ' + sesi + ' · pukul ' + r.jam);
+      el('hitung').textContent = 'Hadir Sesi ' + sesi + ': ' + r.hadir + ' peserta';
+      li.textContent = r.jam + '  ✔ ' + r.kode + ' (Sesi ' + sesi + ')';
+    } else {
+      tampil('gagal', '✖ ' + r.status + (r.kode ? ' — ' + r.kode : ''), r.pesan);
+      li.textContent = '✖ ' + (r.kode || '') + ' — ' + r.status;
+    }
+    bunyi(r.ok);
+    var ul = el('riwayat'); ul.insertBefore(li, ul.firstChild);
+    while (ul.children.length > 15) ul.removeChild(ul.lastChild);
+    muatRingkas();
+  }
+
+  function saatTerbaca(teks) {
+    var now = Date.now();
+    if (sibuk) return;
+    if (teks === terakhir.kode && now - terakhir.t < 4000) return; // abaikan QR yang sama < 4 detik
+    terakhir = { kode: teks, t: now };
+    kirim(teks);
+  }
+
+  el('btnKamera').onclick = function () {
+    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Sesi 1, 2, 3, atau 4 di atas.'); return; }
+    if (scanner) {
+      scanner.stop().then(function () { scanner.clear(); scanner = null; el('btnKamera').textContent = 'Mulai Kamera'; el('btnKamera').classList.remove('merah'); });
+      return;
+    }
+    scanner = new Html5Qrcode('reader');
+    scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 240, height: 240 } }, saatTerbaca, function () {})
+      .then(function () { el('btnKamera').textContent = 'Matikan Kamera'; el('btnKamera').classList.add('merah'); })
+      .catch(function (e) {
+        scanner = null;
+        tampil('gagal', 'Kamera tidak bisa dibuka', 'Izinkan akses kamera, atau pakai tombol "Foto QR di sini". (' + e + ')');
+      });
+  };
+
+  el('btnFoto').onclick = function () { el('inputFoto').click(); };
+  el('inputFoto').onchange = function () {
+    var f = this.files[0]; this.value = '';
+    if (!f) return;
+    tampil('info', 'Membaca foto…');
+    new Html5Qrcode('fileReader').scanFile(f, false)
+      .then(function (teks) { terakhir = { kode: teks, t: Date.now() }; kirim(teks); })
+      .catch(function () { tampil('gagal', 'QR tidak terbaca', 'Foto lebih dekat, terang, dan tidak buram.'); bunyi(false); });
+  };
+
+  el('btnManual').onclick = function () {
+    var v = el('manual').value.trim();
+    if (!v) return;
+    el('manual').value = '';
+    kirim(v);
+  };
+
+  el('btnBelum').onclick = function () {
+    if (!sesi) return;
+    var b = el('belum');
+    if (b.style.display === 'block') { b.style.display = 'none'; return; }
+    b.style.display = 'block'; b.textContent = 'Memuat…';
+    api({ aksi: 'ringkas', sesi: sesi }, function (r) { tampilBelum(r.belum || []); });
+  };
+
+  function tampilBelum(daftar) {
+    el('belum').textContent = daftar.length
+      ? 'Belum hadir Sesi ' + sesi + ' (' + daftar.length + '): ' + daftar.join(', ')
+      : 'Semua peserta sudah hadir di Sesi ' + sesi + '.';
+  }
+
+  try { var simpan = localStorage.getItem('sesiAbsen'); if (simpan) pilihSesi(Number(simpan)); } catch (e) {}
+</script>
+</body>
+</html>
