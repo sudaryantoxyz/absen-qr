@@ -47,8 +47,8 @@
 <main>
   <div class="label">1. Pilih sesi</div>
   <div class="sesi" id="pilihSesi">
-    <button data-s="1">Sesi 1</button><button data-s="2">Sesi 2</button>
-    <button data-s="3">Sesi 3</button><button data-s="4">Sesi 4</button>
+    <button data-s="1">Subuh</button><button data-s="2">Pagi</button>
+    <button data-s="3">Siang</button><button data-s="4">Malam</button>
   </div>
 
   <div class="label">2. Scan QR cocard</div>
@@ -78,6 +78,7 @@
 <script>
   var sesi = null, scanner = null, sibuk = false, terakhir = { kode: '', t: 0 };
   var el = function (id) { return document.getElementById(id); };
+  var NAMA_SESI = ['', 'Subuh', 'Pagi', 'Siang', 'Malam'];
   var API = 'https://script.google.com/macros/s/AKfycbx4JoRTIcZNyth6ZbTQ-8vBmKRHidyNcoyIc0XjLBQkUOl3z0qbRxibrTBIhDGGR3Fjeg/exec';
 
   // Panggil program di Google Sheets (tanpa cookie akun Google, jadi tidak kena bug multi-akun).
@@ -100,7 +101,7 @@
     document.querySelectorAll('#pilihSesi button').forEach(function (b) {
       b.classList.toggle('aktif', Number(b.dataset.s) === n);
     });
-    el('subjudul').textContent = 'Sedang mencatat: SESI ' + n;
+    el('subjudul').textContent = 'Sedang mencatat: SESI ' + NAMA_SESI[n].toUpperCase();
     el('belum').style.display = 'none';
     muatRingkas();
   }
@@ -109,7 +110,7 @@
     if (!sesi) return;
     api({ aksi: 'ringkas', sesi: sesi }, function (r) {
       if (!r || r.total === undefined) return;
-      el('hitung').textContent = 'Hadir Sesi ' + sesi + ': ' + r.hadir + ' dari ' + r.total + ' peserta';
+      el('hitung').textContent = 'Hadir ' + NAMA_SESI[sesi] + ': ' + r.hadir + ' dari ' + r.total + ' peserta';
       var dl = el('daftarKode');
       if (!dl.children.length) r.semuaKode.forEach(function (k) {
         var o = document.createElement('option'); o.value = k; dl.appendChild(o);
@@ -136,7 +137,7 @@
   }
 
   function kirim(teks) {
-    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Sesi 1, 2, 3, atau 4 di atas.'); bunyi(false); return; }
+    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Subuh, Pagi, Siang, atau Malam di atas.'); bunyi(false); return; }
     sibuk = true;
     tampil('info', 'Memproses…', teks);
     api({ aksi: 'absen', kode: teks, sesi: sesi },
@@ -151,9 +152,9 @@
   function hasil(r) {
     var li = document.createElement('li');
     if (r.ok) {
-      tampil('ok', '✔ HADIR — ' + r.kode, r.peran + ' · Sesi ' + sesi + ' · pukul ' + r.jam);
-      el('hitung').textContent = 'Hadir Sesi ' + sesi + ': ' + r.hadir + ' peserta';
-      li.textContent = r.jam + '  ✔ ' + r.kode + ' (Sesi ' + sesi + ')';
+      tampil('ok', '✔ HADIR — ' + r.kode, r.peran + ' · ' + NAMA_SESI[sesi] + ' · pukul ' + r.jam);
+      el('hitung').textContent = 'Hadir ' + NAMA_SESI[sesi] + ': ' + r.hadir + ' peserta';
+      li.textContent = r.jam + '  ✔ ' + r.kode + ' (' + NAMA_SESI[sesi] + ')';
     } else {
       tampil('gagal', '✖ ' + r.status + (r.kode ? ' — ' + r.kode : ''), r.pesan);
       li.textContent = '✖ ' + (r.kode || '') + ' — ' + r.status;
@@ -173,7 +174,7 @@
   }
 
   el('btnKamera').onclick = function () {
-    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Sesi 1, 2, 3, atau 4 di atas.'); return; }
+    if (!sesi) { tampil('gagal', 'Pilih sesi dulu!', 'Ketuk Subuh, Pagi, Siang, atau Malam di atas.'); return; }
     if (scanner) {
       scanner.stop().then(function () { scanner.clear(); scanner = null; el('btnKamera').textContent = 'Mulai Kamera'; el('btnKamera').classList.remove('merah'); });
       return;
@@ -214,8 +215,8 @@
 
   function tampilBelum(daftar) {
     el('belum').textContent = daftar.length
-      ? 'Belum hadir Sesi ' + sesi + ' (' + daftar.length + '): ' + daftar.join(', ')
-      : 'Semua peserta sudah hadir di Sesi ' + sesi + '.';
+      ? 'Belum hadir ' + NAMA_SESI[sesi] + ' (' + daftar.length + '): ' + daftar.join(', ')
+      : 'Semua peserta sudah hadir di sesi ' + NAMA_SESI[sesi] + '.';
   }
 
   try { var simpan = localStorage.getItem('sesiAbsen'); if (simpan) pilihSesi(Number(simpan)); } catch (e) {}
